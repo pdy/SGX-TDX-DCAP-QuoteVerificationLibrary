@@ -70,13 +70,16 @@ TcbLevel::TcbLevel(const std::string& id,
                    const std::vector<TcbComponent>& sgxTcbComponents,
                    const std::vector<TcbComponent>& tdxTcbComponents,
                    const uint32_t pceSvn,
-                   const std::string& status): _id(id),
+                   const std::string& status,
+                   const  std::time_t tcbDate,
+                   std::vector<std::string> advisoryIDs): _id(id),
                                               _version(TcbInfo::Version::V3),
                                               _sgxTcbComponents(sgxTcbComponents),
                                               _tdxTcbComponents(tdxTcbComponents),
                                               _pceSvn(pceSvn),
                                               _status(status),
-                                              _tcbDate(0)
+                                              _tcbDate(tcbDate),
+                                              _advisoryIDs(std::move(advisoryIDs))
 {
     for (uint32_t i = 0; i < sgxTcbComponents.size(); i++)
     {
@@ -360,7 +363,7 @@ void TcbLevel::setTcbComponents(const rapidjson::Value &tcb) {
 
         for (auto itr = tdxComponentsArray.Begin(); itr != tdxComponentsArray.End(); ++itr) {
             auto component = TcbComponent(*itr);
-            _tdxTcbComponents.push_back(component);
+            _tdxTcbComponents.push_back(std::move(component));
         }
     }
 }

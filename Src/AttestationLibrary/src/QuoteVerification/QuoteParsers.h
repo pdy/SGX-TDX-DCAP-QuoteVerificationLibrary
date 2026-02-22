@@ -32,8 +32,9 @@
 #ifndef INTEL_SGX_QVL_QUOTEPARSERS_H_
 #define INTEL_SGX_QVL_QUOTEPARSERS_H_
 
-#include "ByteOperands.h"
+#include <Utils/ByteOperands.h>
 #include <Utils/BufferView.h>
+#include <iterator>
 
 namespace intel { namespace sgx { namespace dcap { namespace quote {
 

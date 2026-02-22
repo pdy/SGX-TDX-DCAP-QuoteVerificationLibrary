@@ -105,7 +105,7 @@ bool Quote::parse(const BufferView &rawQuote)
                 }
                 if (!copyAndAdvance(localTdReport15, from, TD_REPORT15_BYTE_LEN, rawQuote.cend()))
                 {
-                    LOG_ERROR("Can't read TDX TD Report 1.5 from quote. Expected size: {}", TD_REPORT10_BYTE_LEN);
+                    LOG_ERROR("Can't read TDX TD Report 1.5 from quote. Expected size: {}", TD_REPORT15_BYTE_LEN);
                     return false;
                 }
                 signedData = getDataToSignatureVerification(rawQuote, HEADER_BYTE_LEN + BODY_BYTE_SIZE + TD_REPORT15_BYTE_LEN);

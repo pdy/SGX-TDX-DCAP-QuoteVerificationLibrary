@@ -166,8 +166,8 @@ option(HUNTER_KEEP_PACKAGE_SOURCES "Keep third party sources" ON)
 
 include("${CMAKE_CURRENT_LIST_DIR}/ThirdParty/hunter/HunterGate.cmake")
 HunterGate(
-		URL "https://github.com/cpp-pm/hunter/archive/v0.25.6.tar.gz"
-		SHA1 "69e4a05bd514bb05cb2c5aa02ce8ac420516aaf7"
+		URL "https://github.com/cpp-pm/hunter/archive/v0.25.8.tar.gz"
+		SHA1 "26c79d587883ec910bce168e25f6ac4595f97033"
 		FILEPATH "${CMAKE_SOURCE_DIR}/ThirdParty/hunter/config.cmake"
 )
 
@@ -186,6 +186,8 @@ set(CMAKE_USE_PTHREADS_INIT 1)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE) # adds -fpic/-fpie/-pie
+
+set(CMAKE_CXX_STANDARD 17)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -249,7 +251,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU
 	endif()
 	set(CMAKE_CXX_FLAGS
 			"${CMAKE_C_FLAGS}"
-			"-std=c++17"                    #currently used C++ standard
 			"-Wnon-virtual-dtor"
 			"${CMAKE_CXX_FLAGS_CLANG}"
 			"${CMAKE_CXX_FLAGS_GCC}"

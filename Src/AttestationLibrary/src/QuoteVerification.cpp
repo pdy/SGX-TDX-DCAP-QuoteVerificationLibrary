@@ -48,8 +48,6 @@
 #include "Verifiers/EnclaveIdentityVerifier.h"
 #include "Verifiers/EnclaveReportVerifier.h"
 #include "Verifiers/QuoteVerifier.h"
-#include "Verifiers/EnclaveIdentityParser.h"
-#include "Verifiers/EnclaveIdentityV2.h"
 #include "Utils/TimeUtils.h"
 #include "Utils/SafeMemcpy.h"
 
@@ -65,6 +63,7 @@ static constexpr size_t EXPECTED_CERTIFICATE_COUNT_IN_PCK_CHAIN = 3;
 static constexpr size_t EXPECTED_CERTIFICATE_COUNT_IN_TCB_CHAIN = 2;
 
 using namespace intel::sgx;
+using namespace intel::sgx::dcap::parser::json;
 
 const char* sgxAttestationGetVersion()
 {
@@ -145,6 +144,11 @@ Status sgxAttestationVerifyPCKCertificate(const char *pemCertChain, const char *
     {
         auto rootCa = dcap::parser::x509::Certificate::parse(pemRootCaCertificate);
         return dcap::PckCertVerifier{}.verify(chain, rootCaCrl, intermediateCrl, rootCa, currentTime);
+    }
+    catch (const dcap::parser::InvalidExtensionException &ex)
+    {
+        LOG_ERROR("Trusted RootCA parsing failed because of invalid extensions: {}", ex.what());
+        return STATUS_TRUSTED_ROOT_CA_UNSUPPORTED_FORMAT;
     }
     catch (const dcap::parser::FormatException& ex)
     {
@@ -292,15 +296,24 @@ Status sgxAttestationVerifyEnclaveIdentity(const char *enclaveIdentityString, co
         return STATUS_UNSUPPORTED_CERT_FORMAT;
     }
 
-    dcap::EnclaveIdentityParser parser;
-    std::unique_ptr<dcap::EnclaveIdentityV2> enclaveIdentity;
-    try
-    {
-        enclaveIdentity = parser.parse(enclaveIdentityString);
+    std::unique_ptr<EnclaveIdentity> enclaveIdentity;
+    try {
+        enclaveIdentity = std::unique_ptr<EnclaveIdentity>(new EnclaveIdentity(EnclaveIdentity::parse(enclaveIdentityString)));
     }
-    catch (const dcap::ParserException &e)
+    catch (const dcap::parser::FormatException& ex)
     {
-        return e.getStatus();
+        LOG_ERROR("Enclave Identity format error: {}", ex.what());
+        return STATUS_SGX_ENCLAVE_IDENTITY_UNSUPPORTED_FORMAT;
+    }
+    catch (const dcap::parser::InvalidExtensionException& ex)
+    {
+        LOG_ERROR("Enclave Identity invalid extension error: {}", ex.what());
+        return STATUS_SGX_ENCLAVE_IDENTITY_INVALID;
+    }
+    catch (const dcap::parser::InvalidVersionException& ex)
+    {
+        LOG_ERROR("Enclave identity invalid version error: {}", ex.what());
+        return STATUS_SGX_ENCLAVE_IDENTITY_UNSUPPORTED_VERSION;
     }
 
     dcap::CertificateChain chain;
@@ -342,10 +355,16 @@ Status sgxAttestationVerifyEnclaveIdentity(const char *enclaveIdentityString, co
     }
 }
 
-Status sgxAttestationVerifyQuote(const uint8_t* rawQuote, uint32_t quoteSize, const char *pemPckCertificate, const char* pckCrl,
-                                 const char* tcbInfoJson, const char* qeIdentityJson)
+Status sgxAttestationVerifyQuote(const uint8_t* rawQuote, uint32_t quoteSize, const char *pemPckCertificate,
+                                 const char* pckCrl, const char* tcbInfoJson, const char* qeIdentityJson)
 {
-    /// 4.1.2.4.1
+    return sgxAttestationVerifyQuoteEx(rawQuote, quoteSize, pemPckCertificate, pckCrl, tcbInfoJson, qeIdentityJson, nullptr, 0);
+}
+
+Status sgxAttestationVerifyQuoteEx(const uint8_t* rawQuote, uint32_t quoteSize, const char *pemPckCertificate, const char* pckCrl, const char* tcbInfoJson,
+                                   const char* qeIdentityJson, uint8_t* verificationCollateralInfo, uint32_t verificationCollateralInfoSize)
+{
+    /// 4.1.2.5.1
     if(!rawQuote ||
        !pemPckCertificate ||
        !pckCrl ||
@@ -359,7 +378,13 @@ Status sgxAttestationVerifyQuote(const uint8_t* rawQuote, uint32_t quoteSize, co
     // mentioned in doc, is there any max quote len other than numeric_limit<uint32_t>::max() ?
     const BufferView quoteView(rawQuote, quoteSize);
 
-    /// 4.1.2.4.2
+    /// 4.1.2.5.2
+    if (verificationCollateralInfo && verificationCollateralInfoSize < ::constants::VERIFICATION_COLLATERAL_INFO_SIZE_BYTE_LEN)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    /// 4.1.2.5.3
     dcap::Quote quote;
     if(!quote.parse(quoteView) || !quote.validate())
     {
@@ -367,7 +392,7 @@ Status sgxAttestationVerifyQuote(const uint8_t* rawQuote, uint32_t quoteSize, co
         return Status::STATUS_UNSUPPORTED_QUOTE_FORMAT;
     }
 
-    /// 4.1.2.4.5
+    /// 4.1.2.5.6
     dcap::pckparser::CrlStore pckCrlStore;
     if(!pckCrlStore.parse(pckCrl))
     {
@@ -375,7 +400,7 @@ Status sgxAttestationVerifyQuote(const uint8_t* rawQuote, uint32_t quoteSize, co
         return STATUS_UNSUPPORTED_PCK_RL_FORMAT;
     }
 
-    /// 4.1.2.4.8
+    /// 4.1.2.5.9
     dcap::parser::json::TcbInfo tcbInfo;
     try
     {
@@ -392,16 +417,25 @@ Status sgxAttestationVerifyQuote(const uint8_t* rawQuote, uint32_t quoteSize, co
         return STATUS_UNSUPPORTED_TCB_INFO_FORMAT;
     }
 
-    dcap::EnclaveIdentityParser parser;
-    std::unique_ptr<dcap::EnclaveIdentityV2> enclaveIdentity;
+    std::unique_ptr<dcap::parser::json::EnclaveIdentity> enclaveIdentity;
     if (qeIdentityJson != nullptr)
     {
         try {
-            enclaveIdentity = parser.parse(qeIdentityJson);
+            enclaveIdentity = std::unique_ptr<EnclaveIdentity>(new EnclaveIdentity(EnclaveIdentity::parse(qeIdentityJson)));
         }
-        catch (const dcap::ParserException& ex)
+        catch (const dcap::parser::FormatException& ex)
         {
-            LOG_ERROR("Enclave Identity parsing error: {}", ex.what());
+            LOG_ERROR("Enclave Identity format error: {}", ex.what());
+            return STATUS_UNSUPPORTED_QE_IDENTITY_FORMAT;
+        }
+        catch (const dcap::parser::InvalidExtensionException& ex)
+        {
+            LOG_ERROR("Enclave Identity invalid extension error: {}", ex.what());
+            return STATUS_UNSUPPORTED_QE_IDENTITY_FORMAT;
+        }
+        catch (const dcap::parser::InvalidVersionException& ex)
+        {
+            LOG_ERROR("Enclave identity invalid version error: {}", ex.what());
             return STATUS_UNSUPPORTED_QE_IDENTITY_FORMAT;
         }
     }
@@ -409,17 +443,32 @@ Status sgxAttestationVerifyQuote(const uint8_t* rawQuote, uint32_t quoteSize, co
     try
     {
         auto pckCert = dcap::parser::x509::PckCertificate::parse(pemPckCertificate);
-        return dcap::QuoteVerifier{}.verify(quote, pckCert, pckCrlStore, tcbInfo, enclaveIdentity.get(), dcap::EnclaveReportVerifier());
+        auto verCollInfoDataObj = dcap::VerificationCollateralInfo();
+        const auto status = dcap::QuoteVerifier{}.verify(quote, pckCert, pckCrlStore, tcbInfo, enclaveIdentity.get(), dcap::EnclaveReportVerifier(), verCollInfoDataObj);
+
+        /// 4.1.2.5.19
+        if(verificationCollateralInfo && !verCollInfoDataObj.isError())
+        {
+            std::vector<uint8_t> verCollInfoVec = verCollInfoDataObj.aggregateDataAndParseToVec();
+            std::memcpy(verificationCollateralInfo, verCollInfoVec.data(), verificationCollateralInfoSize);
+        }
+
+        return status;
     }
-    catch (const dcap::parser::FormatException& ex) /// 4.1.2.4.3
+    catch (const dcap::parser::FormatException& ex) /// 4.1.2.5.4
     {
         LOG_ERROR("PCK Certificate format error: {}", ex.what());
         return STATUS_UNSUPPORTED_PCK_CERT_FORMAT;
     }
-    catch (const dcap::parser::InvalidExtensionException& ex) /// 4.1.2.4.4
+    catch (const dcap::parser::InvalidExtensionException& ex) /// 4.1.2.5.5
     {
         LOG_ERROR("PCK Certificate invalid extension error: {}", ex.what());
         return STATUS_INVALID_PCK_CERT;
+    }
+    catch (const dcap::VerCollInfoSizeException& ex)
+    {
+        LOG_ERROR("VerificationCollateralInfo structure size error: {}", ex.what());
+        return STATUS_INVALID_PARAMETER;
     }
 }
 
@@ -453,16 +502,25 @@ Status sgxAttestationVerifyEnclaveReport(const uint8_t* enclaveReport, const cha
     }
 
     /// 4.1.2.9.2
-    dcap::EnclaveIdentityParser parser;
-    std::unique_ptr<dcap::EnclaveIdentityV2> enclaveIdentityParsed;
+    std::unique_ptr<EnclaveIdentity> enclaveIdentityParsed;
     try
     {
-        enclaveIdentityParsed = parser.parse(enclaveIdentity);
+        enclaveIdentityParsed = std::unique_ptr<EnclaveIdentity>(new EnclaveIdentity(EnclaveIdentity::parse(enclaveIdentity)));
     }
-    catch(const dcap::ParserException &ex)
+    catch (const dcap::parser::FormatException& ex)
     {
-        LOG_ERROR("Enclave identity parsing error: {}", ex.what());
-        return ex.getStatus();
+        LOG_ERROR("Enclave Identity format error: {}", ex.what());
+        return STATUS_SGX_ENCLAVE_IDENTITY_UNSUPPORTED_FORMAT;
+    }
+    catch (const dcap::parser::InvalidExtensionException& ex)
+    {
+        LOG_ERROR("Enclave Identity invalid extension error: {}", ex.what());
+        return STATUS_SGX_ENCLAVE_IDENTITY_INVALID;
+    }
+    catch (const dcap::parser::InvalidVersionException& ex)
+    {
+        LOG_ERROR("Enclave identity invalid version error: {}", ex.what());
+        return STATUS_SGX_ENCLAVE_IDENTITY_UNSUPPORTED_VERSION;
     }
 
     return dcap::EnclaveReportVerifier{}.verify(enclaveIdentityParsed.get(), eReport);

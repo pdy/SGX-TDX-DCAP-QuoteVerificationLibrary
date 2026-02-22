@@ -32,45 +32,67 @@ param (
 	[Parameter(Mandatory=$false)]
 	[int]$vs = 2017,
 	[Parameter(Mandatory=$false)]
-	[String]$buildTools
+	[String]$buildTools,
+	[Parameter(Mandatory=$false)]
+	[String]$cmakePath
 )
 
-function Invoke-VS-Env {
+function Check-Path {
 	param(
-		[int] $vs
+		[String] $path
 	)
-	$scriptName = $(
-	Get-Childitem -Path "C:\Program Files*\Microsoft Visual Studio\$vs\*\VC\Auxiliary\Build\vcvars64.bat" -Recurse |
-			Select-Object FullName |
-			Select-Object -Last 1
-	).FullName
+	$resolvedPath = $(
+        Get-Childitem -Path "$path" -Recurse |
+                Select-Object FullName |
+                Select-Object -Last 1
+        ).FullName
 
-	if ([string]::IsNullOrWhiteSpace($scriptName)) {
-		Write-Error "Environment for Visual Studio $vs was not found"
+	if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
+		Write-Error "Path $path was not found"
 		exit 1
 	}
-	# Run vcvars64 and get environment variables
-	$cmdline = """$scriptName"" & set"
-	& cmd.exe /c $cmdline | Foreach-Object {
-		if ($_ -match "^(.*?)=(.*)$")
-		{
-			Set-Content "env:\$($matches[1])" $matches[2]
-		}
-	}
+	Write-Host "Resolved path: $resolvedPath"
+	return $resolvedPath
 }
-
-Invoke-VS-Env $vs
 
 New-Item -ItemType Directory -Force -Path ${PSScriptRoot}\Build
 $cwd = Get-Location
 
+$vsPath = "C:\Program Files*\Microsoft Visual Studio\$vs\"
+$vcvarsPath = Check-Path "$vsPath*\VC\Auxiliary\Build\vcvars64.bat"
+if (-not [string]::IsNullOrWhiteSpace($cmakePath)) {
+	$cmakePath = Check-Path $cmakePath
+} else {
+	$cmakePath = Check-Path "$vsPath*\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+}
+$ctestPath = Check-Path "$vsPath*\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe"
+
+# Run vcvars64 and get environment variables
+$cmdline = """$vcvarsPath"" & set"
+& cmd.exe /c $cmdline | Foreach-Object {
+    if ($_ -match "^([^ ]*?)=(.*)$")
+    {
+        if ($matches.Count -eq 3) {
+			# Write-Host "Setting environment variable: $_"
+            Set-Content "env:\$($matches[1])" $matches[2]
+        } else {
+            Write-Host "Skipping invalid environment variable: $_"
+        }
+    }
+}
+if ($LastExitCode -ne 0) {
+    Write-Error "$vcvarsPath failed: $LastExitCode"
+    Set-Location -Path $cwd
+    exit $LastExitCode
+}
+
 $generator = "Visual Studio 15 2017"
 if ($vs -eq 2019) {
-	$generator = "Visual Studio 16 2019"
+    $generator = "Visual Studio 16 2019"
 }
 
 if ($vs -eq 2022) {
-	$generator = "Visual Studio 17 2022"
+    $generator = "Visual Studio 17 2022"
 }
 
 $cmakeGenerateArguments = @('-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CONFIGURATION_TYPES="Release"', '-DBUILD_TEE=ON', '-G', $generator, '-A', 'x64')
@@ -89,7 +111,7 @@ else {
 }
 
 Write-Host "Running CMake with arguments: $cmakeGenerateArguments"
-& cmake $cmakeGenerateArguments
+& $cmakePath $cmakeGenerateArguments
 if($LastExitCode -ne 0)
 {
 	Write-Error "CMake generation failed: $LastExitCode"
@@ -98,8 +120,8 @@ if($LastExitCode -ne 0)
 }
 
 Write-Host "Running MSBuild"
-$cmakeBuildlArguments = @('--build', "${PSScriptRoot}\Build", "--config", "Release", "--target", "install")
-& cmake $cmakeBuildlArguments
+$cmakeBuildArguments = @('--build', "${PSScriptRoot}\Build", "--config", "Release", "--target", "install")
+& $cmakePath $cmakeBuildArguments
 if($LastExitCode -ne 0)
 {
     Write-Error "CMake build failed: $LastExitCode"
@@ -108,14 +130,15 @@ if($LastExitCode -ne 0)
 }
 
 Write-Host "Running tests"
-$ctestArguments = @("-C", "Release", "--test-dir", "${PSScriptRoot}\Build")
-& ctest $ctestArguments
+$ctestArguments = @("-C", "Release", "--verbose", "--test-dir", "${PSScriptRoot}\Build")
+& $ctestPath $ctestArguments
 if($LastExitCode -ne 0)
 {
 	Write-Error "CTest failed: $LastExitCode"
 	Set-Location -Path $cwd
 	exit $LastExitCode
 }
+Write-Host "--------------"
 
 Set-Location -Path $cwd
 Write-Host "Finished successfully"
