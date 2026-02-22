@@ -356,7 +356,7 @@ TEST_F(QuoteV3VerifierUT, shouldReturnTcbRevokedOnLatestRevokedEqualPckTCB)
 {
     const auto [quoteView, quoteBin] = gen.buildQuote();
 
-    tcbs.insert(tcbs.begin(), dcap::parser::json::TcbLevel{cpusvn, toUint16(pcesvn[1], pcesvn[0]), "Revoked"});
+    tcbs.insert(tcbs.begin(), dcap::parser::json::TcbLevel{cpusvn, toUint16(pcesvn[1], pcesvn[0]), "Revoked", 0, {"INTEL-SA-00001"}});
     EXPECT_CALL(tcbInfoJson, getTcbLevels()).WillOnce(testing::ReturnRef(tcbs));
 
     dcap::Quote quote;
@@ -499,7 +499,7 @@ TEST_F(QuoteV3VerifierUT, shouldReturnTcbRevokedWhenOnlyCpuSvnIsLower)
     std::vector<uint8_t> lowerCpusvn = cpusvn;
     lowerCpusvn[8]--;
 
-    tcbs.insert(tcbs.begin(), dcap::parser::json::TcbLevel{lowerCpusvn, toUint16(pcesvn[1], pcesvn[0]), "Revoked"});
+    tcbs.insert(tcbs.begin(), dcap::parser::json::TcbLevel{lowerCpusvn, toUint16(pcesvn[1], pcesvn[0]), "Revoked", 0, {"INTEL-SA-00001"}});
     EXPECT_CALL(tcbInfoJson, getTcbLevels()).WillOnce(testing::ReturnRef(tcbs));
 
     dcap::Quote quote;
